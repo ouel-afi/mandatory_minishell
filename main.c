@@ -6,7 +6,7 @@
 /*   By: ouel-afi <ouel-afi@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/07/09 15:45:13 by ouel-afi          #+#    #+#             */
-/*   Updated: 2025/07/20 11:18:27 by ouel-afi         ###   ########.fr       */
+/*   Updated: 2025/07/20 14:06:42 by ouel-afi         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -34,9 +34,11 @@ typedef enum s_type {
 typedef struct s_token {
 	char	*value;
 	t_type		type;
+	struct s_token *prev;
 	int			has_space;
 	int expand_heredoc;
 	char **cmds;
+	int expand;
 	struct s_token *redir;
 	int fd;
 	struct s_token *next;
@@ -113,7 +115,9 @@ t_token	*create_token(char *value, char quote, int has_space)
 	token->expand_heredoc = 0;
 	token->cmds = NULL;
 	token->redir = NULL;
+	token->prev = NULL;
 	token->fd = -1;
+	token->expand = -1;
 	return (token);
 }
 
@@ -600,6 +604,7 @@ void to_expand(t_token *tmp, t_env *env_list)
 		}
 		else if (tmp->value[i] == '$')
 		{
+			tmp->expand = 1;
 			if (tmp->value[i + 1] == '?')
 			{
 				// get_exit_status();
@@ -1841,6 +1846,78 @@ int execute_cmds(t_token *token, t_env **env_list, int last_status)
 	return status;
 }
 
+// t_token *create_split_token(t_token *token)
+// {
+// 	if (!token)
+// 		return NULL;
+// 	t_token *tmp = token;
+// 	t_token *work;
+// 	while (tmp)
+// 	{
+// 		if (tmp->value && tmp->expand == 1)
+// 		{
+				
+// 		}
+// 		else
+		
+// 	}
+	 
+// }
+
+void split_expanded_tokens(t_token **head)
+{
+	t_token *current = *head;
+
+	while (current)
+	{
+		if (current->expand == 1 && current->value && strchr(current->value, ' '))
+		{
+			char **words = ft_split(current->value, ' ');
+			if (!words)
+				return;
+
+			// Replace current->value with first word
+			free(current->value);
+			current->value = strdup(words[0]);
+
+			t_token *prev = current;
+			int i = 1;
+			while (words[i])
+			{
+				t_token *new = malloc(sizeof(t_token));
+				if (!new)
+					break;
+				new->value = strdup(words[i]);
+				new->type = current->type;
+				new->expand = 0;
+				new->has_space = 0;
+				new->expand_heredoc = 0;
+				new->cmds = NULL;
+				new->redir = NULL;
+
+				// Insert into linked list
+				new->next = prev->next;
+				new->prev = prev;
+				if (prev->next)
+					prev->next->prev = new;
+				prev->next = new;
+
+				prev = new;
+				i++;
+			}
+
+			// Free split array
+			i = 0;
+			while (words[i])
+				free(words[i++]);
+			free(words);
+		}
+		current = current->next;
+	}
+}
+
+
+
 int main(int ac, char **av, char **env)
 {
 	int last_exit_status = 0;
@@ -1891,6 +1968,10 @@ int main(int ac, char **av, char **env)
 		}
 		expand_variables(&token_list, env_list);
 		join_tokens(&token_list);
+		print_linked_list(token_list);
+		
+		split_expanded_tokens(&token_list);
+		print_linked_list(token_list);
 		final_token = get_cmd_and_redir(token_list);
 		process_heredoc(final_token);
 		last_exit_status = execute_cmds(final_token, &env_list, last_exit_status);
