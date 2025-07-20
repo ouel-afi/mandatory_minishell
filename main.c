@@ -6,7 +6,7 @@
 /*   By: ouel-afi <ouel-afi@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/07/09 15:45:13 by ouel-afi          #+#    #+#             */
-/*   Updated: 2025/07/20 14:06:42 by ouel-afi         ###   ########.fr       */
+/*   Updated: 2025/07/20 16:30:34 by ouel-afi         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -51,6 +51,8 @@ typedef struct s_env
 	char **env;
 	struct s_env *next;
 }	t_env;
+
+void expand_heredoc(char **line, t_env *env_list);
 
 void	print_linked_list(t_token *token_list)
 {
@@ -112,7 +114,7 @@ t_token	*create_token(char *value, char quote, int has_space)
 	else
 		token->type = 0;
 	token->has_space = has_space;
-	token->expand_heredoc = 0;
+	// token->expand_heredoc = 0;
 	token->cmds = NULL;
 	token->redir = NULL;
 	token->prev = NULL;
@@ -653,9 +655,11 @@ void expand_variables(t_token **token_list, t_env *env_list)
 
 t_token *get_cmd_and_redir(t_token *token_list)
 {
+	int expand_h_doc = 0;
     t_token *final_token = NULL;
     t_token *tmp = token_list;
     t_token *pipe;
+	// print_linked_list(token_list);
 
     while (tmp)
     {
@@ -692,11 +696,13 @@ t_token *get_cmd_and_redir(t_token *token_list)
                 }
                 else if (tmp->type == REDIR_IN || tmp->type == REDIR_OUT || tmp->type == APPEND || tmp->type == HEREDOC)
                 {
+					expand_h_doc = tmp->next->expand_heredoc;
                     t_token *redir_op = tmp;
                     t_token *redir_target = tmp->next;
                     if (!redir_target)
                         break;
                     t_token *redir_token = create_token(redir_target->value, 0, redir_target->has_space);
+					redir_token->expand_heredoc = expand_h_doc;
                     redir_token->type = redir_op->type;
                     if (!redir_head)
                         redir_head = redir_token;
@@ -791,7 +797,7 @@ void	heredoc_sigint_handler(int sig)
 	exit(130);
 }
 
-void	handle_heredoc_input(char *delimiter, int write_fd)
+void	handle_heredoc_input(char *delimiter, int write_fd, int expand, t_env *envlist)
 {
 	char	*line;
 
@@ -808,13 +814,45 @@ void	handle_heredoc_input(char *delimiter, int write_fd)
 			free(line);
 			break ;
 		}
+		printf("line : %s\n", line);
+		if (expand == 1)
+		{
+			printf("we should expand this shit\n");
+			expand_heredoc(&line, envlist);			//false
+			printf("line : %s\n", line);
+			printf("djdj\n");
+		}
 		write(write_fd, line, ft_strlen(line));
 		write(write_fd, "\n", 1);
 		free(line);
 	}
 }
 
-void process_heredoc(t_token *token)
+// void	handle_heredoc_input(char *delimiter, int write_fd, t_token *token, t_env *env_list)
+// {
+// 	char	*line;
+
+// 	while (1)
+// 	{
+// 		line = readline("> ");
+// 		if (!line)
+// 		{
+// 			write(1, " ", 1);
+// 			break ;
+// 		}
+// 		if (strcmp(line, delimiter) == 0)
+// 		{
+// 			free(line);
+// 			break ;
+// 		}
+// 		if (token)
+// 		write(write_fd, line, ft_strlen(line));
+// 		write(write_fd, "\n", 1);
+// 		free(line);
+// 	}
+// }
+
+void process_heredoc(t_token *token, t_env *env_list)
 {
 	int		status;
 	pid_t pid;
@@ -853,7 +891,7 @@ void process_heredoc(t_token *token)
 						close(pipe_fd[0]);
 						signal(SIGINT, heredoc_sigint_handler);
 						signal(SIGQUIT, SIG_IGN);
-						handle_heredoc_input(redir->value, pipe_fd[1]);
+						handle_heredoc_input(redir->value, pipe_fd[1],token->redir->expand_heredoc, env_list);
 						close(pipe_fd[1]);
 						exit(0);
 					}
@@ -1875,11 +1913,8 @@ void split_expanded_tokens(t_token **head)
 			char **words = ft_split(current->value, ' ');
 			if (!words)
 				return;
-
-			// Replace current->value with first word
 			free(current->value);
 			current->value = strdup(words[0]);
-
 			t_token *prev = current;
 			int i = 1;
 			while (words[i])
@@ -1894,19 +1929,14 @@ void split_expanded_tokens(t_token **head)
 				new->expand_heredoc = 0;
 				new->cmds = NULL;
 				new->redir = NULL;
-
-				// Insert into linked list
 				new->next = prev->next;
 				new->prev = prev;
 				if (prev->next)
 					prev->next->prev = new;
 				prev->next = new;
-
 				prev = new;
 				i++;
 			}
-
-			// Free split array
 			i = 0;
 			while (words[i])
 				free(words[i++]);
@@ -1916,7 +1946,63 @@ void split_expanded_tokens(t_token **head)
 	}
 }
 
+void replace_var_heredoc(char *line, int i, char *env, int len)
+{
+	char *start = ft_substr(line, 0, i);
+	char *end = ft_strdup(line + i + 1 + len);
+	char *new = ft_strjoin(start, env);
+	char *value = ft_strjoin(new, end);
+	// free(line);
+	line = value;
+	// free(start);
+	// free(end);
+	// free(new);
+}
 
+void to_expand_heredoc(char *line, t_env *env_list)
+{
+	char *var_name = NULL;
+	char *env_value = NULL;
+	int i = 0;
+	while (line[i])
+	{
+		if (line[i] == '$' && (line[i + 1] == '$' || line[i + 1] == '\0'))
+		{
+			i++;
+			if (line[i] == '\0')
+				break;
+		}
+		else if (line[i] == '$')
+		{
+			if (line[i + 1] == '?')
+			{
+				// get_exit_status();
+				i++;
+			}
+			else
+			{	
+				var_name = get_var(line, i + 1);
+				env_value = get_env_var(env_list, var_name);
+				if (env_value)
+				{
+					replace_var_heredoc(line, i, env_value, ft_strlen(var_name));
+					i += ft_strlen(var_name);	
+				}
+				else
+					replace_var_heredoc(line, i, "", ft_strlen(var_name));
+			}
+			// free(var_name);
+		}
+		i++;
+	}
+}
+
+void expand_heredoc(char **line, t_env *env_list) 
+{
+	if (!line || !line[0])
+		return ;
+	to_expand_heredoc(line[0], env_list);
+}
 
 int main(int ac, char **av, char **env)
 {
@@ -1968,12 +2054,13 @@ int main(int ac, char **av, char **env)
 		}
 		expand_variables(&token_list, env_list);
 		join_tokens(&token_list);
-		print_linked_list(token_list);
+		// print_linked_list(token_list);
 		
 		split_expanded_tokens(&token_list);
-		print_linked_list(token_list);
+		// print_linked_list(token_list);
 		final_token = get_cmd_and_redir(token_list);
-		process_heredoc(final_token);
+		// print_linked_list(final_token);
+		process_heredoc(final_token, env_list);
 		last_exit_status = execute_cmds(final_token, &env_list, last_exit_status);
 	}
 }
