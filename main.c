@@ -6,7 +6,7 @@
 /*   By: ouel-afi <ouel-afi@student.42.fr>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/07/09 15:45:13 by ouel-afi          #+#    #+#             */
-/*   Updated: 2025/07/15 12:25:59 by ouel-afi         ###   ########.fr       */
+/*   Updated: 2025/07/20 11:18:27 by ouel-afi         ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -49,6 +49,43 @@ typedef struct s_env
 	char **env;
 	struct s_env *next;
 }	t_env;
+
+void	print_linked_list(t_token *token_list)
+{
+	t_token	*current;
+	t_token	*redir_tmp;
+	int		i;
+
+	current = token_list;
+	while (current)
+	{
+		printf("token->value = %s		token->type =%d			token->has_space = %d		token->expand_heredoc = %d\n",
+			current->value, current->type, current->has_space, current->expand_heredoc);
+		if (current->cmds)
+		{
+			printf("  cmds: ");
+			i = 0;
+			while (current->cmds[i])
+			{
+				printf("[%s] ", current->cmds[i]);
+				i++;
+			}
+			printf("\n");
+		}
+		if (current->redir)
+		{
+			printf("  redir: ");
+			redir_tmp = current->redir;
+			while (redir_tmp)
+			{
+				printf("[type:%d value:%s] ", redir_tmp->type, redir_tmp->value);
+				redir_tmp = redir_tmp->next;
+			}
+			printf("\n");
+		}
+		current = current->next;
+	}
+}
 
 t_token	*create_token(char *value, char quote, int has_space)
 {
@@ -97,21 +134,23 @@ void	handle_word_quote(char **result, t_lexer *lexer, int *in_quotes)
 	char	*new_result;
 	size_t	start;
 
+	printf("pos1 : %d\n", lexer->position);
 	quote = lexer->input[lexer->position++];
 	start = lexer->position;
 	*in_quotes = 1;
 	while (lexer->position < lexer->length
 		&& lexer->input[lexer->position] != quote)
 		lexer->position++;
+	printf("pos2 : %d\n", lexer->position);
 	if (lexer->position >= lexer->length)
 	{
 		ft_putstr_fd("bash : syntax error unclosed quotes\n", 2);
 		return ;
 	}
 	temp = ft_substr(lexer->input, start, lexer->position - start);
-	new_result = ft_strjoin(*result, temp);
-	free(*result);
-	*result = new_result;
+	// new_result = ft_strjoin(*result, temp);
+	// free(*result);
+	*result = temp;
 	lexer->position++;
 	*in_quotes = 0;
 	free(temp);
@@ -157,7 +196,9 @@ t_token	*handle_word(t_lexer *lexer)
 	while (lexer->position < lexer->length && !is_space(lexer))
 	{
 		if (is_quote(lexer->input[lexer->position]))
-			handle_word_quote(&result, lexer, &in_quotes);
+		{
+			break;
+		}
 		else if (!in_quotes && is_special_char(lexer->input[lexer->position]))
 			break ;
 		else
@@ -582,12 +623,12 @@ void to_expand(t_token *tmp, t_env *env_list)
 	}
 }
 
-void expand_variables(t_token **token_list, t_env *env_list)
+void expand_variables(t_token **token_list, t_env *env_list) 
 {
 	if (!token_list)
 		return ;
 	t_token *tmp = *token_list;
-	while (tmp)
+	while (tmp) 
 	{
 		if (tmp->type == 8 && tmp->next)
 		{
@@ -597,95 +638,12 @@ void expand_variables(t_token **token_list, t_env *env_list)
 			else
 				tmp->expand_heredoc = 1;
 		}
-		else if (tmp->type == 1 || tmp->type == 4)
+		else if (tmp->type == 1 || tmp->type == 4){
+			// print_linked_list(tmp);
 			to_expand(tmp, env_list);
+		}
 		tmp = tmp->next; 		
 	}
-}
-
-void	print_linked_list(t_token *token_list)
-{
-	t_token	*current;
-	t_token	*redir_tmp;
-	int		i;
-
-	current = token_list;
-	while (current)
-	{
-		printf("token->value = %s		token->type =%d			token->has_space = %d		token->expand_heredoc = %d\n",
-			current->value, current->type, current->has_space, current->expand_heredoc);
-		if (current->cmds)
-		{
-			printf("  cmds: ");
-			i = 0;
-			while (current->cmds[i])
-			{
-				printf("[%s] ", current->cmds[i]);
-				i++;
-			}
-			printf("\n");
-		}
-		if (current->redir)
-		{
-			printf("  redir: ");
-			redir_tmp = current->redir;
-			while (redir_tmp)
-			{
-				printf("[type:%d value:%s] ", redir_tmp->type, redir_tmp->value);
-				redir_tmp = redir_tmp->next;
-			}
-			printf("\n");
-		}
-		current = current->next;
-	}
-}
-
-static t_token *extract_redirections(t_token **tmp)
-{
-	t_token *redir_head = NULL;
-	t_token *redir_tail = NULL;
-
-	while (*tmp && ((*tmp)->type == REDIR_IN || (*tmp)->type == REDIR_OUT || (*tmp)->type == APPEND || (*tmp)->type == HEREDOC))
-	{
-		t_token *redir_op = *tmp;
-		t_token *redir_target = redir_op->next;
-
-		if (!redir_target)
-			break;
-
-		t_token *redir_token = create_token(redir_target->value, 0, redir_target->has_space);
-		redir_token->type = redir_op->type;
-
-		if (!redir_head)
-			redir_head = redir_token;
-		else
-			redir_tail->next = redir_token;
-		redir_tail = redir_token;
-
-		*tmp = redir_target->next;
-	}
-	return redir_head;
-}
-
-static int	count_words(char const *str, char c)
-{
-	size_t	i;
-	size_t	count;
-
-	count = 0;
-	i = 0;
-	while (str[i])
-	{
-		if (str[i] == c)
-			i++;
-		else
-		{
-			count++;
-			while (str[i] && str[i] != c)
-				i++;
-		}
-	}
-	return (count);
 }
 
 t_token *get_cmd_and_redir(t_token *token_list)
@@ -1354,7 +1312,7 @@ int	is_num(const char *str)
 		return (0);
 	while (str[i])
 	{
-		if (!isdigit((unsigned char)str[i]))
+		if (!is_digit(str[i]))
 			return (0);
 		i++;
 	}
@@ -1807,6 +1765,7 @@ int	execute_cmd(char **cmds, t_env *envlist, t_token *node)
 
 int	execute_pipe(t_token *token, t_env **env_list, int last_status)
 {
+	(void)last_status;
 	int		fd[2];
 	pid_t	pid1, pid2;
 	int		status;
@@ -1935,6 +1894,5 @@ int main(int ac, char **av, char **env)
 		final_token = get_cmd_and_redir(token_list);
 		process_heredoc(final_token);
 		last_exit_status = execute_cmds(final_token, &env_list, last_exit_status);
-		// print_linked_list(final_token);
 	}
 }
